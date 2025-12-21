@@ -16,6 +16,9 @@ from sklearn.model_selection import ParameterGrid, ParameterSampler
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+from dataset import CSVDataGenerator
+from main import Config
+
 # Define the UserWithPredefBudget class
 class UserWithPredefBudget:
     def __init__(
@@ -1006,7 +1009,7 @@ class Params(object):
                  other.slate_size, other.epsilon, other.seed))
     
 
-def run_sarsa_for_seed(budget, discount_factor, seed, num_iterations_for_model_fitting, num_users):
+def run_sarsa_for_seed(budget, discount_factor, seed, num_iterations_for_model_fitting, num_users, item_relevances):
     np.random.seed(seed)
     behavior_policy_params = Params(
         num_users=num_users,
@@ -1048,7 +1051,7 @@ def run_sarsa_for_seed(budget, discount_factor, seed, num_iterations_for_model_f
     )
     return behavior_policy_params, experiment_results[0]
 
-def run_qlearning_for_seed(budget, discount_factor, seed, num_iter, num_users):
+def run_qlearning_for_seed(budget, discount_factor, seed, num_iter, num_users, item_relevances):
     np.random.seed(seed)
     behavior_policy_params = Params(
         num_users=num_users,
@@ -1380,6 +1383,24 @@ def plot_comparison():
     plt.figure(figsize=(10, 8))
     sns.lineplot(data=ql_vs_sarsa_df, x = 'user_budget', y = 'delta_play_rate', marker = 'o')
 
+def get_item_relevances():
+    item_relevance_map = {}
+    CONFIG = Config()
+    dataset = CSVDataGenerator(CONFIG.train_set, CONFIG.seq_len)
+    train_preds = train_preds.reshape(-1)
+    for idx, item in enumerate(dataset.items):
+        if item not in item_relevance_map:
+            item_relevance_map[item] = [train_preds[idx]]
+        else:
+            item_relevance_map[item].append(train_preds[idx])
+    print(len(item_relevance_map))
+
+    item_relevances = [np.median(values) for values in item_relevance_map.values()]
+    item_relevances = np.array(item_relevances)
+    print(item_relevances.shape)
+    print(item_relevances[:5])
+    return item_relevances
+
 if __name__ == "__main__":
         # FIXED Hyper-parameters used in the results in the notebook
     num_items = 142998
@@ -1402,12 +1423,15 @@ if __name__ == "__main__":
     parameter_grid = ParameterGrid(parameter_range)
 
     results_sarsa = {}
+    item_relevances = get_item_relevances()
     for p in parameter_grid:
         params, experiment_results = run_sarsa_for_seed(
             seed=p['seed'], budget=p['budget'],
             discount_factor=p['discount_factor'],
             num_iterations_for_model_fitting=50,
-            num_users=num_users)
+            num_users=num_users,
+            item_relevances=item_relevances
+        )
         results_sarsa[str(params)] = experiment_results
 
     results_qlearning = {}
@@ -1417,7 +1441,8 @@ if __name__ == "__main__":
             budget=p['budget'],
             discount_factor=p['discount_factor'],
             num_iter=15,
-            num_users=num_users
+            num_users=num_users,
+            item_relevances=item_relevances
         )
         results_qlearning[str(params)] = experiment_results
 
