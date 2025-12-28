@@ -7,7 +7,7 @@ from xgboost import XGBRegressor
 from sklearn.metrics import roc_auc_score
 import pandas as pd
 from joblib import Parallel, delayed
-from sklearn.model_selection import ParameterGrid
+from sklearn.model_selection import ParameterGrid, ParameterSampler
 import matplotlib.pyplot as plt
 import seaborn as sns
 import json
@@ -1020,11 +1020,7 @@ def run_sarsa_for_seed(budget, discount_factor, seed, num_iterations_for_model_f
         user_budget_scale,
         behavior_policy_params.num_users
     )
-    #relevance_all_items = np.random.normal(
-    #    log_relevance_mean,
-    #    log_relevance_scale,
-    #    size=behavior_policy_params.num_docs
-    #)
+
     relevance_all_items = item_relevances
 
     cost_all_items = np.random.uniform(
@@ -1065,11 +1061,7 @@ def run_qlearning_for_seed(budget, discount_factor, seed, num_iter, num_users, i
         user_budget_scale,
         behavior_policy_params.num_users
     )
-    # relevance_all_items = np.random.normal(
-    #     log_relevance_mean,
-    #     log_relevance_scale,
-    #     size=behavior_policy_params.num_docs
-    # )
+    
     relevance_all_items = item_relevances
 
     cost_all_items = np.random.uniform(
