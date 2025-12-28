@@ -1201,7 +1201,7 @@ def plot_results():
         ax.set_ylabel('Play Rate')
 
     plt.tight_layout()
-    plt.savefig("playrate_v_budget.png", dpi=300, bbox_inches='tight')
+    plt.savefig("../outputs/playrate_v_budget.png", dpi=300, bbox_inches='tight')
     plt.show()
 
     # Plotting Effective Slate Size vs. Discount Factor for each User Budget and Algorithm
@@ -1217,7 +1217,7 @@ def plot_results():
         ax.set_ylabel('Effective Slate Size')
 
     plt.tight_layout()
-    plt.savefig("slatesize_v_budget.png", dpi=300, bbox_inches='tight')
+    plt.savefig("../outputs/slatesize_v_budget.png", dpi=300, bbox_inches='tight')
     plt.show()
 
     # Analyzing the Change in Metrics between discount_factor = 0.2 and 0.8
@@ -1238,7 +1238,7 @@ def plot_results():
     plt.title('Delta Effective Slate Size (% Change from Discount Factor 0.2 to 0.8)')
     plt.xlabel('User Budget')
     plt.ylabel('Delta Effective Slate Size (%)')
-    plt.savefig("delss_v_budget.png", dpi=300, bbox_inches='tight')
+    plt.savefig("../outputs/delss_v_budget.png", dpi=300, bbox_inches='tight')
     plt.show()
 
     # Plot Delta Play Rate vs. User Budget
@@ -1247,7 +1247,7 @@ def plot_results():
     plt.title('Delta Play Rate (% Change from Discount Factor 0.2 to 0.8)')
     plt.xlabel('User Budget')
     plt.ylabel('Delta Play Rate (%)')
-    plt.savefig("dpr_v_budget.png", dpi=300, bbox_inches='tight')
+    plt.savefig("../outputs/dpr_v_budget.png", dpi=300, bbox_inches='tight')
     plt.show()
 
 def plot_comparison():
