@@ -39,11 +39,14 @@ Make sure to set the correct hyper-parameters and initial parameter ranges for t
 If you use this codebase in academic work, please cite:
 
 ```
-@misc{Budget-Constrained-RLRS,
-  title   = {Budget-Constrained-RLRS},
-  author  = {Anonymous},
-  year    = {2025},
-  howpublished = {\url{https://github.com/anonymous/Budget-Constrained-RLRS}}
+@misc{chakrabarty2025timeconstrainedrecommendationsreinforcementlearning,
+    title={Time-Constrained Recommendations: Reinforcement Learning Strategies for E-Commerce}, 
+    author={Sayak Chakrabarty and Souradip Pal},
+    year={2025},
+    eprint={2512.13726},
+    archivePrefix={arXiv},
+    primaryClass={cs.LG},
+    url={https://arxiv.org/abs/2512.13726}
 }
 ```
 
