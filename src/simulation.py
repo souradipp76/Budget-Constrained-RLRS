@@ -1,8 +1,3 @@
-import functools
-import sklearn.preprocessing
-import scipy.special
-
-
 import pandas as pd
 import ast
 import torch
@@ -12,12 +7,13 @@ from xgboost import XGBRegressor
 from sklearn.metrics import roc_auc_score
 import pandas as pd
 from joblib import Parallel, delayed
-from sklearn.model_selection import ParameterGrid, ParameterSampler
+from sklearn.model_selection import ParameterGrid
 import matplotlib.pyplot as plt
 import seaborn as sns
+import json
 
 from dataset import CSVDataGenerator
-from main import Config
+from main import Config, predict
 
 # Define the UserWithPredefBudget class
 class UserWithPredefBudget:
@@ -61,7 +57,7 @@ class UserWithPredefBudget:
 
         adjusted_scores = watched * slate_doc_relevances
         adjusted_scores_1 = torch.where(adjusted_scores == 0,
-                                        torch.tensor(-np.Inf) * torch.ones_like(adjusted_scores),
+                                        torch.tensor(-np.inf) * torch.ones_like(adjusted_scores),
                                         adjusted_scores)
 
         logits = torch.cat((adjusted_scores_1, self.default_no_choice_logit[..., None]), dim=-1)
@@ -428,7 +424,7 @@ def train_xgb_model_for_qlearning(
                 n_estimators=1,
                 learning_rate=0.1 / call_count,
                 n_jobs=24,
-                verbosity=1
+                verbosity=0
             ).fit(
                 stacked_training_features,
                 td_targets,
@@ -440,7 +436,7 @@ def train_xgb_model_for_qlearning(
                 objective='reg:squarederror',
                 n_estimators=1,
                 n_jobs=24,
-                verbosity=3
+                verbosity=0
             ).fit(
                 stacked_training_features,
                 td_targets
@@ -465,7 +461,7 @@ def compute_qlearning_target(
 
         # apply masking
         for ind, slate_above in enumerate(slates_above_list):
-            predicted_q_values_all_actions[ind, slate_above] = -np.Inf
+            predicted_q_values_all_actions[ind, slate_above] = -np.inf
 
         optimal_q_values_for_next_step = predicted_q_values_all_actions.max(axis=1)
 
@@ -491,7 +487,7 @@ def unroll_traj_in_feature_df(num_users, slate_size, traj):
     label = label[:, :-1]
 
     impression = traj['user_response']['watched'].numpy()
-    print('avg impressions,', np.mean(impression.sum(axis=1)))
+    # print('avg impressions,', np.mean(impression.sum(axis=1)))
     x1 = np.repeat(np.arange(num_users), slate_size)
     x2 = np.tile(np.arange(slate_size), num_users)
     x3 = np.ravel(item_ids)
@@ -625,7 +621,7 @@ def train_xgb_model(
                 n_estimators=1,
                 learning_rate=0.1 / call_count,
                 n_jobs=24,
-                verbosity=1
+                verbosity=0
             ).fit(
                 stacked_training_features,
                 td_targets,
@@ -637,7 +633,7 @@ def train_xgb_model(
                 objective='reg:squarederror',
                 n_estimators=1,
                 n_jobs=24,
-                verbosity=3
+                verbosity=0
             ).fit(
                 stacked_training_features,
                 td_targets
@@ -769,7 +765,7 @@ def generate_user_slate(
             num_docs
         )
         predicted_q_values = xgb_model.predict(feature_matrix)
-        predicted_q_values[chosen_actions] = -np.Inf
+        predicted_q_values[chosen_actions] = -np.inf
         chosen_action = epsilon_greedy_policy(predicted_q_values, epsilon, chosen_actions, seed)
         chosen_actions.append(chosen_action)
         user_budget_to_go -= cost_all_items[chosen_action]
@@ -834,7 +830,7 @@ def run_sarsa(
     results = []
     traj_list = []
     for iter_ind in range(num_iter):
-        print(iter_ind, ',generating simulated data ')
+        print(f"Iteration {iter_ind + 1}/{num_iter}: Generating simulated data ...")
 
         traj = get_simulation_data(
             num_users=num_users,
@@ -858,8 +854,8 @@ def run_sarsa(
             slate_size=slate_size
         )
 
-        print(iter_ind, ',play_rate, avg_impressions:', metrics, ',auc:', auc_score)
-        print(iter_ind, ',generating user slates ...')
+        print(f"Iteration {iter_ind + 1}/{num_iter}: Play Rate: {metrics[0]}, Avg Impressions: {metrics[1]}, AUC: {auc_score}")
+        print(f"Iteration {iter_ind + 1}/{num_iter}: Generating user slates ...")
 
         user_slates = generate_user_slates(
             xgb_model=xgb_model,
@@ -900,7 +896,7 @@ def run_qlearning(
     traj_list = []
 
     if (print_logs):
-        print('generating simulated data ')
+        print(f'Generating Simulated Data ...')
 
     behavior_policy_traj = get_simulation_data(
         num_users=num_users,
@@ -917,7 +913,7 @@ def run_qlearning(
     behavior_policy_metrics = compute_metrics(behavior_policy_traj, slate_size, num_users)
 
     if (print_logs):
-        print('behavior_policy', 'play_rate, avg_impressions:', behavior_policy_metrics)
+        print(f"Behavior Policy Metrics - Play Rate: {behavior_policy_metrics[0]}, Avg Impressions: {behavior_policy_metrics[1]}")
 
     xgb_model, auc_score = learn_optimal_q_function(
         behavior_policy_traj,
@@ -932,7 +928,7 @@ def run_qlearning(
     )
 
     if (print_logs):
-        print('generating user slates from qlearning policy...')
+        print('Generating User Slates from QLearning Policy ...')
 
     user_slates_from_qlearning_policy = generate_user_slates(
         xgb_model=xgb_model,
@@ -961,8 +957,7 @@ def run_qlearning(
     qlearning_policy_metrics = compute_metrics(qlearning_policy_traj, slate_size, num_users)
 
     if (print_logs):
-        print('qlearning_model', 'auc', auc_score)
-        print('qlearning_policy', 'play_rate, avg_impressions:', qlearning_policy_metrics)
+        print(f"Play Rate: {qlearning_policy_metrics[0]}, Avg Impressions: {qlearning_policy_metrics[1]}, AUC: {auc_score}")
 
     # print(user_slates[0])
     results.append(qlearning_policy_metrics)
@@ -1008,8 +1003,8 @@ class Params(object):
                ((other.budget, other.discount_factor, other.num_users, other.num_docs,
                  other.slate_size, other.epsilon, other.seed))
     
-
 def run_sarsa_for_seed(budget, discount_factor, seed, num_iterations_for_model_fitting, num_users, item_relevances):
+    print(f"====== SARSA Experiement Start - [Seed: {seed}, Budget: {budget}, Discount Factor: {discount_factor}] ======")
     np.random.seed(seed)
     behavior_policy_params = Params(
         num_users=num_users,
@@ -1049,9 +1044,12 @@ def run_sarsa_for_seed(budget, discount_factor, seed, num_iterations_for_model_f
         num_iter=num_iterations_for_model_fitting,
         seed=behavior_policy_params.seed
     )
+
+    print(f"====== SARSA Experiement End - [Seed: {seed}, Budget: {budget}, Discount Factor: {discount_factor}] ======")
     return behavior_policy_params, experiment_results[0]
 
 def run_qlearning_for_seed(budget, discount_factor, seed, num_iter, num_users, item_relevances):
+    print(f"====== Q-Learning Experiement Start - [Seed: {seed}, Budget: {budget}, Discount Factor: {discount_factor}] ======")
     np.random.seed(seed)
     behavior_policy_params = Params(
         num_users=num_users,
@@ -1092,59 +1090,22 @@ def run_qlearning_for_seed(budget, discount_factor, seed, num_iter, num_users, i
         seed=behavior_policy_params.seed,
         print_logs=True
     )
+
+    print(f"====== Q-Learning Experiement End - [Seed: {seed}, Budget: {budget}, Discount Factor: {discount_factor}] ======")
+
     return behavior_policy_params, results
 
-
-def extract_results(method='sarsa'):
-    with open(f'../outputs/out_{method}.txt', 'r') as f:
-        lines = f.readlines()
-
-    pattern = r"\(([\d\.]+),\s*([\d\.]+)\)"
-    import re
-    import json
-    ind = 0
-    i = 0
-    key = ""
-    results = {}
-    pg = list(parameter_grid)
-    for line in lines:
-        if line.startswith(f'{i} ,play_rate'):
-            if i == 0:
-                print(print(pg[0]))
-                key = f"budget : {pg[ind]['budget']}, discount_factor : {pg[ind]['discount_factor']},\n        num_users : 150, num_docs : 142998,\n        slate_size : 30, epsilon : 0.1, seed : {pg[ind]['seed']}"
-                results[key] = []
-            match = re.search(pattern, line)
-            if match:
-                # Extract the two numbers
-                num1 = float(match.group(1))
-                num2 = float(match.group(2))
-                results[key].append((num1, num2))
-                print(f"Extracted numbers: {num1}, {num2}")
-                i+=1
-            else:
-                print("No matching numbers found.")
-
-            if i == 24:
-                ind +=1
-                i = 0
-
-    print(results)
-    with open(f'results_{method}.txt', 'w') as f:
-        json.dump(results, f, indent=4)       
-
-
-
-def txt_to_dataframe(file_path):
+def json_to_dataframe(file_path):
     """
-    Reads a text file containing a dictionary of results, parses it, and converts it into a pandas DataFrame.
+    Reads a JSON file containing a dictionary of results, parses it, and converts it into a pandas DataFrame.
 
     Parameters:
-    - file_path (str): The path to the 'results_sarsa.txt' or 'results_qlearning.txt' file.
+    - file_path (str): The path to the 'results_sarsa.json' or 'results_qlearning.json' file.
 
     Returns:
     - pd.DataFrame: A DataFrame with extracted parameters and corresponding values.
     """
-    # Read the content of the text file
+    # Read the content of the JSON file
     with open(file_path, 'r') as f:
         content = f.read()
     
@@ -1152,7 +1113,7 @@ def txt_to_dataframe(file_path):
         # Safely evaluate the string content to a Python dictionary
         data_dict = ast.literal_eval(content)
     except Exception as e:
-        raise ValueError("Error parsing the text file. Ensure it contains a valid dictionary.") from e
+        raise ValueError("Error parsing the JSON file. Ensure it contains a valid dictionary.") from e
     
     records = []
     
@@ -1210,18 +1171,17 @@ def txt_to_dataframe(file_path):
     
     return df
 
-
 def plot_results():
 
     # Set seaborn theme
     sns.set_theme(style="whitegrid")
 
-    # Function to convert txt to DataFrame (ensure this is defined as above)
-    # from your_module import txt_to_dataframe  # if saved separately
+    # Function to convert json to DataFrame (ensure this is defined as above)
+    # from your_module import json_to_dataframe  # if saved separately
 
-    # Read the data from txt files
-    sarsa_results_df = txt_to_dataframe("results_sarsa.txt")
-    qlearning_results_df = txt_to_dataframe("results_qlearning.txt")
+    # Read the data from json files
+    sarsa_results_df = json_to_dataframe("../outputs/results_sarsa.json")
+    qlearning_results_df = json_to_dataframe("../outputs/results_qlearning.json")
 
     # Optionally, add an 'algorithm' column to differentiate between SARSA and Q-learning
     sarsa_results_df['algorithm'] = 'SARSA'
@@ -1237,10 +1197,10 @@ def plot_results():
     print("User Budgets:", user_budgets)
 
     # Plotting Play Rate vs. Discount Factor for each User Budget and Algorithm
-    f, axes = plt.subplots(nrows=1, ncols=len(user_budgets), figsize=(16, 6), sharex=True, sharey=True)
+    f, axes = plt.subplots(nrows=1, ncols=len(user_budgets), figsize=(16, 6), sharex=True, sharey=True, squeeze=False)
 
     for n, ub in enumerate(user_budgets):
-        ax = axes[n]
+        ax = axes[0][n]
         sub_result = combined_df[combined_df.user_budget == ub]
         sns.lineplot(ax=ax, data=sub_result,
                     x='discount_factor', y='play_rate', hue='algorithm', marker='o')
@@ -1249,13 +1209,14 @@ def plot_results():
         ax.set_ylabel('Play Rate')
 
     plt.tight_layout()
+    plt.savefig("playrate_v_budget.png", dpi=300, bbox_inches='tight')
     plt.show()
 
     # Plotting Effective Slate Size vs. Discount Factor for each User Budget and Algorithm
-    f, axes = plt.subplots(nrows=1, ncols=len(user_budgets), figsize=(16, 6), sharex=True, sharey=True)
+    f, axes = plt.subplots(nrows=1, ncols=len(user_budgets), figsize=(16, 6), sharex=True, sharey=True, squeeze=False)
 
     for n, ub in enumerate(user_budgets):
-        ax = axes[n]
+        ax = axes[0][n]
         sub_result = combined_df[combined_df.user_budget == ub]
         sns.lineplot(ax=ax, data=sub_result,
                     x='discount_factor', y='effective_slate_size', hue='algorithm', marker='o')
@@ -1264,6 +1225,7 @@ def plot_results():
         ax.set_ylabel('Effective Slate Size')
 
     plt.tight_layout()
+    plt.savefig("slatesize_v_budget.png", dpi=300, bbox_inches='tight')
     plt.show()
 
     # Analyzing the Change in Metrics between discount_factor = 0.2 and 0.8
@@ -1284,6 +1246,7 @@ def plot_results():
     plt.title('Delta Effective Slate Size (% Change from Discount Factor 0.2 to 0.8)')
     plt.xlabel('User Budget')
     plt.ylabel('Delta Effective Slate Size (%)')
+    plt.savefig("delss_v_budget.png", dpi=300, bbox_inches='tight')
     plt.show()
 
     # Plot Delta Play Rate vs. User Budget
@@ -1292,41 +1255,13 @@ def plot_results():
     plt.title('Delta Play Rate (% Change from Discount Factor 0.2 to 0.8)')
     plt.xlabel('User Budget')
     plt.ylabel('Delta Play Rate (%)')
+    plt.savefig("dpr_v_budget.png", dpi=300, bbox_inches='tight')
     plt.show()
-
-
-# import pickle as pkl
-# sarsa_results = pkl.load(open('sarsa_results.pkl', 'rb'))
-# qlearning_results = pkl.load(open('qlearning_results.pkl', 'rb'))
-
-def make_results_df(all_results):
-    df_list = []
-    for b in sorted(all_results.keys()):
-        for gamma in sorted(all_results[b].keys()):
-            play_rates_for_seed = []
-            imp_rates_for_seed = []
-            seeds = []
-            for seed, result_seq in all_results[b][gamma]:
-                final_play_rate = result_seq[-1][0]
-                final_imp_rate = result_seq[-1][1]
-                play_rates_for_seed.append(final_play_rate)
-                imp_rates_for_seed.append(final_imp_rate)
-                seeds.append(seed)
-
-            df_list.append(pd.DataFrame({'user_budget' : b,
-                                         'discount_factor' : gamma,
-                                         'seed' : seeds,
-                                         'play_rate' : play_rates_for_seed,
-                                         'effective_slate_size' : imp_rates_for_seed}))
-    return pd.concat(df_list)
 
 def plot_comparison():
 
-    # sarsa_results_df = make_results_df(sarsa_results)
-    # sarsa_results_df = make_results_df(sarsa_results)
-
-    sarsa_results_df = txt_to_dataframe("results_sarsa.txt")
-    qlearning_results_df = txt_to_dataframe("results_qlearning.txt")
+    sarsa_results_df = json_to_dataframe("../outputs/results_sarsa.json")
+    qlearning_results_df = json_to_dataframe("../outputs/results_qlearning.json")
 
     sns.set_theme('notebook')
 
@@ -1387,52 +1322,56 @@ def get_item_relevances():
     item_relevance_map = {}
     CONFIG = Config()
     dataset = CSVDataGenerator(CONFIG.train_set, CONFIG.seq_len)
-    train_preds = train_preds.reshape(-1)
+    preds = predict(CONFIG, 'train')
+    preds = preds.reshape(-1)
     for idx, item in enumerate(dataset.items):
         if item not in item_relevance_map:
-            item_relevance_map[item] = [train_preds[idx]]
+            item_relevance_map[item] = [preds[idx]]
         else:
-            item_relevance_map[item].append(train_preds[idx])
-    print(len(item_relevance_map))
+            item_relevance_map[item].append(preds[idx])
+    # print(len(item_relevance_map))
 
     item_relevances = [np.median(values) for values in item_relevance_map.values()]
     item_relevances = np.array(item_relevances)
-    print(item_relevances.shape)
-    print(item_relevances[:5])
+    # print(item_relevances.shape)
+    # print(item_relevances[:5])
     return item_relevances
 
 if __name__ == "__main__":
-        # FIXED Hyper-parameters used in the results in the notebook
+    # FIXED Hyper-parameters used in the results in the notebook
     num_items = 142998
     slate_size = 30
     epsilon = 0.1
     user_budget_scale = 0.5
-    # log_relevance_mean = 0.0
-    # log_relevance_scale = 2.0
     cost_low = 0.
     cost_high = 100.
     num_users = 150
 
     parameter_range = {
         'budget': [100., 150., 200.0, 250., 300., 400., 500.],
-        'discount_factor': [0.2, 0.4, 0.6, 0.8, 1.0],
+        'discount_factor': [0, 0.2, 0.4, 0.6, 0.8, 1.0],
         'seed': range(5)
     }
     # SUGGESTION: first try out a few samples from the grid
     # parameter_grid = ParameterSampler(parameter_range, 1)
     parameter_grid = ParameterGrid(parameter_range)
 
-    results_sarsa = {}
     item_relevances = get_item_relevances()
+
+    results_sarsa = {}
     for p in parameter_grid:
         params, experiment_results = run_sarsa_for_seed(
             seed=p['seed'], budget=p['budget'],
             discount_factor=p['discount_factor'],
-            num_iterations_for_model_fitting=50,
+            num_iterations_for_model_fitting=5,
             num_users=num_users,
             item_relevances=item_relevances
         )
         results_sarsa[str(params)] = experiment_results
+
+    # print(results_sarsa)
+    with open('../outputs/results_sarsa.json', 'w') as f:
+        json.dump(results_sarsa, f, indent=4, default=lambda o: float(o) if isinstance(o, np.floating) else o)
 
     results_qlearning = {}
     for p in parameter_grid:
@@ -1440,14 +1379,15 @@ if __name__ == "__main__":
             seed=p['seed'],
             budget=p['budget'],
             discount_factor=p['discount_factor'],
-            num_iter=15,
+            num_iter=5,
             num_users=num_users,
             item_relevances=item_relevances
         )
         results_qlearning[str(params)] = experiment_results
-
-    df = txt_to_dataframe('results_sarsa.txt')
-    print(df.head())
+    
+    # print(results_qlearning)
+    with open('../outputs/results_qlearning.json', 'w') as f:
+        json.dump(results_qlearning, f, indent=4, default=lambda o: float(o) if isinstance(o, np.floating) else o)
 
     plot_results()
     plot_comparison()
