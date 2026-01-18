@@ -220,8 +220,7 @@ class DrrModel(nn.Module):
         time_score = self.time_score_dense1(enc_output)
         time_score = torch.tanh(time_score)
         time_score = self.time_score_dense2(time_score).squeeze(-1)
-        score_output = F.softmax(time_score, dim=-1)
-        return score_output, attn_weights
+        return time_score, attn_weights
 
 class LRSchedulerPerStep:
     """
