@@ -1,6 +1,8 @@
 import pandas as pd
 import ast
 import torch
+import torch.nn as nn
+import torch.optim as optim
 import numpy as np
 import sklearn.model_selection
 from xgboost import XGBRegressor
@@ -1163,152 +1165,686 @@ def json_to_dataframe(file_path):
     
     return df
 
+def _load_all_results():
+    """Load all five algorithm result files into a single combined DataFrame."""
+    algo_files = {
+        'SARSA':      '../outputs/results_sarsa.json',
+        'Q-Learning': '../outputs/results_qlearning.json',
+        'PPO':        '../outputs/results_ppo.json',
+        'GRPO':       '../outputs/results_grpo.json',
+        'GSPO':       '../outputs/results_gspo.json',
+    }
+    dfs = []
+    for algo, path in algo_files.items():
+        try:
+            df = json_to_dataframe(path)
+            df['algorithm'] = algo
+            dfs.append(df)
+        except FileNotFoundError:
+            print(f"[warning] {path} not found – skipping {algo}")
+    return pd.concat(dfs, ignore_index=True)
+
+
 def plot_results():
-
-    # Set seaborn theme
+    """Plot Play Rate and Effective Slate Size vs Discount Factor for all algorithms."""
     sns.set_theme(style="whitegrid")
-
-    # Function to convert json to DataFrame (ensure this is defined as above)
-    # from your_module import json_to_dataframe  # if saved separately
-
-    # Read the data from json files
-    sarsa_results_df = json_to_dataframe("../outputs/results_sarsa.json")
-    qlearning_results_df = json_to_dataframe("../outputs/results_qlearning.json")
-
-    # Optionally, add an 'algorithm' column to differentiate between SARSA and Q-learning
-    sarsa_results_df['algorithm'] = 'SARSA'
-    qlearning_results_df['algorithm'] = 'Q-learning'
-
-    # Combine both DataFrames for comparative analysis
-    combined_df = pd.concat([sarsa_results_df, qlearning_results_df], ignore_index=True)
-
+    combined_df = _load_all_results()
     print(combined_df.head())
 
-    # Extract unique user budgets and sort them
     user_budgets = np.sort(combined_df['user_budget'].unique())
     print("User Budgets:", user_budgets)
 
-    # Plotting Play Rate vs. Discount Factor for each User Budget and Algorithm
-    f, axes = plt.subplots(nrows=1, ncols=len(user_budgets), figsize=(16, 6), sharex=True, sharey=True, squeeze=False)
+    algo_order = ['SARSA', 'Q-Learning', 'PPO', 'GRPO', 'GSPO']
+    palette = sns.color_palette("tab10", n_colors=len(algo_order))
 
+    # --- Play Rate vs Discount Factor ---
+    f, axes = plt.subplots(nrows=1, ncols=len(user_budgets),
+                           figsize=(4 * len(user_budgets), 5),
+                           sharex=True, sharey=True, squeeze=False)
     for n, ub in enumerate(user_budgets):
         ax = axes[0][n]
-        sub_result = combined_df[combined_df.user_budget == ub]
-        sns.lineplot(ax=ax, data=sub_result,
-                    x='discount_factor', y='play_rate', hue='algorithm', marker='o')
-        ax.set_title(f'User Budget: {ub}')
+        sub = combined_df[combined_df.user_budget == ub]
+        sns.lineplot(ax=ax, data=sub, x='discount_factor', y='play_rate',
+                     hue='algorithm', hue_order=algo_order, palette=palette,
+                     marker='o', errorbar='se')
+        ax.set_title(f'Budget = {ub}')
         ax.set_xlabel('Discount Factor')
-        ax.set_ylabel('Play Rate')
-
+        ax.set_ylabel('Play Rate' if n == 0 else '')
+        if n > 0:
+            ax.get_legend().remove()
+    axes[0][-1].legend(title='Algorithm', bbox_to_anchor=(1.02, 1), loc='upper left')
+    plt.suptitle('Play Rate vs Discount Factor', fontsize=13, y=1.02)
     plt.tight_layout()
-    plt.savefig("../outputs/playrate_v_budget.png", dpi=300, bbox_inches='tight')
+    plt.savefig("../outputs/playrate_v_budget_all.png", dpi=300, bbox_inches='tight')
     plt.show()
 
-    # Plotting Effective Slate Size vs. Discount Factor for each User Budget and Algorithm
-    f, axes = plt.subplots(nrows=1, ncols=len(user_budgets), figsize=(16, 6), sharex=True, sharey=True, squeeze=False)
-
+    # --- Effective Slate Size vs Discount Factor ---
+    f, axes = plt.subplots(nrows=1, ncols=len(user_budgets),
+                           figsize=(4 * len(user_budgets), 5),
+                           sharex=True, sharey=True, squeeze=False)
     for n, ub in enumerate(user_budgets):
         ax = axes[0][n]
-        sub_result = combined_df[combined_df.user_budget == ub]
-        sns.lineplot(ax=ax, data=sub_result,
-                    x='discount_factor', y='effective_slate_size', hue='algorithm', marker='o')
-        ax.set_title(f'User Budget: {ub}')
+        sub = combined_df[combined_df.user_budget == ub]
+        sns.lineplot(ax=ax, data=sub, x='discount_factor', y='effective_slate_size',
+                     hue='algorithm', hue_order=algo_order, palette=palette,
+                     marker='o', errorbar='se')
+        ax.set_title(f'Budget = {ub}')
         ax.set_xlabel('Discount Factor')
-        ax.set_ylabel('Effective Slate Size')
-
+        ax.set_ylabel('Effective Slate Size' if n == 0 else '')
+        if n > 0:
+            ax.get_legend().remove()
+    axes[0][-1].legend(title='Algorithm', bbox_to_anchor=(1.02, 1), loc='upper left')
+    plt.suptitle('Effective Slate Size vs Discount Factor', fontsize=13, y=1.02)
     plt.tight_layout()
-    plt.savefig("../outputs/slatesize_v_budget.png", dpi=300, bbox_inches='tight')
+    plt.savefig("../outputs/slatesize_v_budget_all.png", dpi=300, bbox_inches='tight')
     plt.show()
 
-    # Analyzing the Change in Metrics between discount_factor = 0.2 and 0.8
-    # Ensure that discount_factor = 0.2 and 0.8 exist
-    df_0_2 = combined_df[combined_df.discount_factor == 0.2].copy()
-    df_0_8 = combined_df[combined_df.discount_factor == 0.8].copy()
+    # --- Delta metrics: % change from discount_factor=0.2 to 0.8 ---
+    df_02 = combined_df[combined_df.discount_factor == 0.2].copy()
+    df_08 = combined_df[combined_df.discount_factor == 0.8].copy()
+    merged = pd.merge(df_02, df_08, on=['user_budget', 'algorithm'], suffixes=('_02', '_08'))
+    merged['delta_play_rate'] = (
+        100. * (merged['play_rate_08'] - merged['play_rate_02']) / merged['play_rate_02']
+    )
+    merged['delta_effective_slate_size'] = (
+        100. * (merged['effective_slate_size_08'] - merged['effective_slate_size_02'])
+        / merged['effective_slate_size_02']
+    )
 
-    # Merge on 'user_budget' and 'algorithm' to compare SARSA and Q-learning
-    cb_vs_rl_df = pd.merge(df_0_2, df_0_8, on=['user_budget', 'algorithm'], suffixes=('_0_2', '_0_8'))
-
-    # Calculate percentage changes
-    cb_vs_rl_df['delta_play_rate'] = 100. * (cb_vs_rl_df['play_rate_0_8'] - cb_vs_rl_df['play_rate_0_2']) / cb_vs_rl_df['play_rate_0_2']
-    cb_vs_rl_df['delta_effective_slate_size'] = 100. * (cb_vs_rl_df['effective_slate_size_0_8'] - cb_vs_rl_df['effective_slate_size_0_2']) / cb_vs_rl_df['effective_slate_size_0_2']
-
-    # Plot Delta Effective Slate Size vs. User Budget
-    plt.figure(figsize=(10, 8))
-    sns.lineplot(data=cb_vs_rl_df, x='user_budget', y='delta_effective_slate_size', hue='algorithm', marker='o')
-    plt.title('Delta Effective Slate Size (% Change from Discount Factor 0.2 to 0.8)')
+    plt.figure(figsize=(10, 6))
+    sns.lineplot(data=merged, x='user_budget', y='delta_effective_slate_size',
+                 hue='algorithm', hue_order=algo_order, palette=palette, marker='o')
+    plt.title('Δ Effective Slate Size (%, DF 0.2→0.8)')
     plt.xlabel('User Budget')
-    plt.ylabel('Delta Effective Slate Size (%)')
-    plt.savefig("../outputs/delss_v_budget.png", dpi=300, bbox_inches='tight')
+    plt.ylabel('Δ Effective Slate Size (%)')
+    plt.tight_layout()
+    plt.savefig("../outputs/delss_v_budget_all.png", dpi=300, bbox_inches='tight')
     plt.show()
 
-    # Plot Delta Play Rate vs. User Budget
-    plt.figure(figsize=(10, 8))
-    sns.lineplot(data=cb_vs_rl_df, x='user_budget', y='delta_play_rate', hue='algorithm', marker='o')
-    plt.title('Delta Play Rate (% Change from Discount Factor 0.2 to 0.8)')
+    plt.figure(figsize=(10, 6))
+    sns.lineplot(data=merged, x='user_budget', y='delta_play_rate',
+                 hue='algorithm', hue_order=algo_order, palette=palette, marker='o')
+    plt.title('Δ Play Rate (%, DF 0.2→0.8)')
     plt.xlabel('User Budget')
-    plt.ylabel('Delta Play Rate (%)')
-    plt.savefig("../outputs/dpr_v_budget.png", dpi=300, bbox_inches='tight')
+    plt.ylabel('Δ Play Rate (%)')
+    plt.tight_layout()
+    plt.savefig("../outputs/dpr_v_budget_all.png", dpi=300, bbox_inches='tight')
     plt.show()
+
 
 def plot_comparison():
-
+    """Detailed comparison plots: SARSA only (legacy), then all-5-algorithm overlays."""
     sarsa_results_df = json_to_dataframe("../outputs/results_sarsa.json")
     qlearning_results_df = json_to_dataframe("../outputs/results_qlearning.json")
 
     sns.set_theme('notebook')
+    algo_order = ['SARSA', 'Q-Learning', 'PPO', 'GRPO', 'GSPO']
+    palette = sns.color_palette("tab10", n_colors=len(algo_order))
 
-    user_budgets = np.sort(np.unique(sarsa_results_df.user_budget))
     user_budgets = [150, 300, 500]
+
+    # Legacy SARSA-only panels
     f, axes = plt.subplots(nrows=1, ncols=len(user_budgets), figsize=(16, 6), sharex=True, sharey=True)
     for n, ub in enumerate(user_budgets):
         sub_result = sarsa_results_df[sarsa_results_df.user_budget == ub].reset_index()
-        sns.lineplot(ax=axes[n], data = sub_result,
-                    x = 'discount_factor', y = 'play_rate', marker='o').set(title=f'User Budget: {ub}')
-
+        sns.lineplot(ax=axes[n], data=sub_result,
+                     x='discount_factor', y='play_rate', marker='o').set(title=f'User Budget: {ub}')
 
     f, axes = plt.subplots(nrows=1, ncols=len(user_budgets), figsize=(16, 6), sharex=True, sharey=True)
     for n, ub in enumerate(user_budgets):
         sub_result = sarsa_results_df[sarsa_results_df.user_budget == ub].reset_index()
-        sns.lineplot(ax=axes[n], data = sub_result,
-                    x = 'discount_factor', y = 'effective_slate_size', marker='o').set(title=f'User Budget: {ub}')
+        sns.lineplot(ax=axes[n], data=sub_result,
+                     x='discount_factor', y='effective_slate_size', marker='o').set(title=f'User Budget: {ub}')
 
-
-    sarsa_results_df_discount_factor_02 = sarsa_results_df[sarsa_results_df.discount_factor == 0.2].reset_index()
-    sarsa_results_df_discount_factor_08 = sarsa_results_df[sarsa_results_df.discount_factor == 0.8].reset_index()
-
-    cb_vs_rl_df = pd.merge(sarsa_results_df_discount_factor_02,
-            sarsa_results_df_discount_factor_08, on = ['user_budget', 'seed'])
-
-    cb_vs_rl_df['delta_play_rate'] =\
-    100. * (cb_vs_rl_df['play_rate_y'] - cb_vs_rl_df['play_rate_x']) / (cb_vs_rl_df['play_rate_x'])
-
-    cb_vs_rl_df['delta_effective_slate_size'] =\
-    100. * (cb_vs_rl_df['effective_slate_size_y'] - cb_vs_rl_df['effective_slate_size_x']) / (cb_vs_rl_df['effective_slate_size_x'])
-
+    sarsa_df_02 = sarsa_results_df[sarsa_results_df.discount_factor == 0.2].reset_index()
+    sarsa_df_08 = sarsa_results_df[sarsa_results_df.discount_factor == 0.8].reset_index()
+    cb_vs_rl_df = pd.merge(sarsa_df_02, sarsa_df_08, on=['user_budget', 'seed'])
+    cb_vs_rl_df['delta_play_rate'] = (
+        100. * (cb_vs_rl_df['play_rate_y'] - cb_vs_rl_df['play_rate_x']) / cb_vs_rl_df['play_rate_x']
+    )
+    cb_vs_rl_df['delta_effective_slate_size'] = (
+        100. * (cb_vs_rl_df['effective_slate_size_y'] - cb_vs_rl_df['effective_slate_size_x'])
+        / cb_vs_rl_df['effective_slate_size_x']
+    )
     plt.figure(figsize=(10, 8))
-    sns.lineplot(data=cb_vs_rl_df, x = 'user_budget', y = 'delta_effective_slate_size', marker = 'o')
-
+    sns.lineplot(data=cb_vs_rl_df, x='user_budget', y='delta_effective_slate_size', marker='o')
     plt.figure(figsize=(10, 8))
-    sns.lineplot(data=cb_vs_rl_df, x = 'user_budget', y = 'delta_play_rate', marker = 'o')
+    sns.lineplot(data=cb_vs_rl_df, x='user_budget', y='delta_play_rate', marker='o')
 
-
-
-
-    results_df_q_learning_discount_factor_08 = qlearning_results_df[qlearning_results_df.discount_factor == 0.8]
-
-    ql_vs_sarsa_df = pd.merge(results_df_q_learning_discount_factor_08,
-                            sarsa_results_df_discount_factor_08, on = ['user_budget', 'seed'])
-
-    ql_vs_sarsa_df['delta_play_rate'] = 100.* (ql_vs_sarsa_df['play_rate_x'] - ql_vs_sarsa_df['play_rate_y']) / ql_vs_sarsa_df['play_rate_y']
-
-    ql_vs_sarsa_df['delta_effective_slate_size'] =\
-    100 * (ql_vs_sarsa_df['effective_slate_size_x'] - ql_vs_sarsa_df['effective_slate_size_y']) / (ql_vs_sarsa_df['effective_slate_size_y'])
-
+    ql_df_08 = qlearning_results_df[qlearning_results_df.discount_factor == 0.8]
+    ql_vs_sarsa_df = pd.merge(ql_df_08, sarsa_df_08, on=['user_budget', 'seed'])
+    ql_vs_sarsa_df['delta_play_rate'] = (
+        100. * (ql_vs_sarsa_df['play_rate_x'] - ql_vs_sarsa_df['play_rate_y']) / ql_vs_sarsa_df['play_rate_y']
+    )
+    ql_vs_sarsa_df['delta_effective_slate_size'] = (
+        100. * (ql_vs_sarsa_df['effective_slate_size_x'] - ql_vs_sarsa_df['effective_slate_size_y'])
+        / ql_vs_sarsa_df['effective_slate_size_y']
+    )
     plt.figure(figsize=(10, 8))
-    sns.lineplot(data=ql_vs_sarsa_df, x = 'user_budget', y = 'delta_effective_slate_size', marker = 'o')
-
+    sns.lineplot(data=ql_vs_sarsa_df, x='user_budget', y='delta_effective_slate_size', marker='o')
     plt.figure(figsize=(10, 8))
-    sns.lineplot(data=ql_vs_sarsa_df, x = 'user_budget', y = 'delta_play_rate', marker = 'o')
+    sns.lineplot(data=ql_vs_sarsa_df, x='user_budget', y='delta_play_rate', marker='o')
+
+    # --- All-5-algorithm overlay panels (3 focal budgets) ---
+    combined_df = _load_all_results()
+    sub_combined = combined_df[combined_df.user_budget.isin(user_budgets)]
+
+    f, axes = plt.subplots(nrows=1, ncols=len(user_budgets),
+                           figsize=(16, 6), sharex=True, sharey=True)
+    for n, ub in enumerate(user_budgets):
+        sub = sub_combined[sub_combined.user_budget == ub]
+        sns.lineplot(ax=axes[n], data=sub, x='discount_factor', y='play_rate',
+                     hue='algorithm', hue_order=algo_order, palette=palette, marker='o')
+        axes[n].set_title(f'Budget = {ub}')
+        axes[n].set_xlabel('Discount Factor')
+        axes[n].set_ylabel('Play Rate' if n == 0 else '')
+        if n < len(user_budgets) - 1:
+            axes[n].get_legend().remove()
+    plt.suptitle('Play Rate – All Algorithms', fontsize=13)
+    plt.tight_layout()
+    plt.savefig("../outputs/playrate_all_algos.png", dpi=300, bbox_inches='tight')
+    plt.show()
+
+    f, axes = plt.subplots(nrows=1, ncols=len(user_budgets),
+                           figsize=(16, 6), sharex=True, sharey=True)
+    for n, ub in enumerate(user_budgets):
+        sub = sub_combined[sub_combined.user_budget == ub]
+        sns.lineplot(ax=axes[n], data=sub, x='discount_factor', y='effective_slate_size',
+                     hue='algorithm', hue_order=algo_order, palette=palette, marker='o')
+        axes[n].set_title(f'Budget = {ub}')
+        axes[n].set_xlabel('Discount Factor')
+        axes[n].set_ylabel('Effective Slate Size' if n == 0 else '')
+        if n < len(user_budgets) - 1:
+            axes[n].get_legend().remove()
+    plt.suptitle('Effective Slate Size – All Algorithms', fontsize=13)
+    plt.tight_layout()
+    plt.savefig("../outputs/slatesize_all_algos.png", dpi=300, bbox_inches='tight')
+    plt.show()
+
+# ============================================================
+# Neural Network Policy Components (PPO and GRPO)
+# ============================================================
+
+class PolicyNetwork(nn.Module):
+    """Scores each (state, item) pair to form a distribution over items.
+
+    Input features: (row_position, relevance, cost, budget_to_go, cum_relevance).
+    """
+    def __init__(self, state_dim=5, hidden_dim=64):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(state_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(hidden_dim, 1)
+        )
+
+    def forward(self, x):
+        return self.net(x).squeeze(-1)
+
+
+class ValueNetwork(nn.Module):
+    """Estimates V(s) where s = (row_position, budget_to_go, cum_relevance)."""
+    def __init__(self, state_dim=3, hidden_dim=64):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(state_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(hidden_dim, 1)
+        )
+
+    def forward(self, x):
+        return self.net(x).squeeze(-1)
+
+
+def _build_item_features_tensor(k, relevance_all_items, cost_all_items,
+                                 budget_to_go, cum_relevance, num_docs):
+    arr = generate_feature_matrix(k, relevance_all_items, cost_all_items,
+                                  budget_to_go, cum_relevance, num_docs)
+    return torch.FloatTensor(arr)
+
+
+def _sampled_action_logprob(policy_net, features, chosen_idx, excluded_set,
+                             device, num_neg=512):
+    """Approximate log prob of chosen_idx using sampled softmax over negatives."""
+    num_docs = features.shape[0]
+    valid = np.array([i for i in range(num_docs) if i not in excluded_set])
+    k = min(num_neg, len(valid))
+    sample_ids = np.random.choice(valid, k, replace=False)
+    if chosen_idx not in sample_ids:
+        sample_ids = np.append(sample_ids, chosen_idx)
+
+    sample_feat = features[sample_ids].to(device)
+    logits = policy_net(sample_feat)
+    log_probs = torch.log_softmax(logits, dim=0)
+    chosen_pos = int(np.where(sample_ids == chosen_idx)[0][0])
+    return log_probs[chosen_pos]
+
+
+def _generate_user_slate_neural(policy_net, all_user_budgets, relevance_all_items,
+                                 cost_all_items, slate_size, num_docs, user_ind,
+                                 device, deterministic=False):
+    """Generate one user's slate via neural policy; return slate, log_probs, state_feats."""
+    chosen, log_probs_list, state_feats_list = [], [], []
+    budget = float(all_user_budgets[user_ind])
+    cum_rel = float(np.exp(0.0))
+
+    policy_net.eval()
+    with torch.no_grad():
+        for k in range(slate_size):
+            feats = _build_item_features_tensor(
+                k, relevance_all_items, cost_all_items, budget, cum_rel, num_docs
+            ).to(device)
+            logits = policy_net(feats)
+            mask = torch.ones(num_docs, dtype=torch.bool, device=device)
+            for a in chosen:
+                mask[a] = False
+            logits = logits.masked_fill(~mask, float('-inf'))
+
+            if deterministic:
+                action = logits.argmax().item()
+            else:
+                probs = torch.softmax(logits, dim=0)
+                action = torch.multinomial(probs, 1).item()
+
+            log_probs_list.append(torch.log_softmax(logits, dim=0)[action].item())
+            state_feats_list.append([float(k), budget, cum_rel])
+            chosen.append(action)
+            budget -= float(cost_all_items[action])
+            cum_rel += float(np.exp(relevance_all_items[action]))
+
+    return chosen, log_probs_list, state_feats_list
+
+
+def _collect_trajectories(policy_net, all_user_budgets, relevance_all_items,
+                           cost_all_items, slate_size, num_docs, num_users, device):
+    """Collect slates + metadata from all users under current policy."""
+    all_slates = np.zeros((num_users, slate_size), dtype=np.int32)
+    all_log_probs, all_state_feats = [], []
+    for u in range(num_users):
+        slate, lps, sfs = _generate_user_slate_neural(
+            policy_net, all_user_budgets, relevance_all_items, cost_all_items,
+            slate_size, num_docs, u, device
+        )
+        all_slates[u] = slate
+        all_log_probs.append(lps)
+        all_state_feats.append(sfs)
+    return all_slates, all_log_probs, all_state_feats
+
+
+def _get_per_position_rewards(traj, num_users, slate_size):
+    """Per-user, per-position click reward (1 if clicked, else 0)."""
+    choice = traj['user_response']['choice'].numpy()
+    return [[1.0 if choice[u] == k else 0.0 for k in range(slate_size)]
+            for u in range(num_users)]
+
+
+def _compute_gae(rewards, values, discount_factor, gae_lambda=0.95):
+    """Generalised Advantage Estimation for a single trajectory."""
+    T = len(rewards)
+    returns, advantages, gae = [0.0] * T, [0.0] * T, 0.0
+    for t in reversed(range(T)):
+        next_v = values[t + 1] if t + 1 < T else 0.0
+        delta = rewards[t] + discount_factor * next_v - values[t]
+        gae = delta + discount_factor * gae_lambda * gae
+        advantages[t] = gae
+        returns[t] = gae + values[t]
+    return returns, advantages
+
+
+# ============================================================
+# PPO
+# ============================================================
+
+def run_ppo(
+        num_users, slate_size, num_docs, user_initial_budget,
+        doc_costs, doc_relevances, discount_factor,
+        num_iter=5, seed=0, ppo_epochs=3, clip_eps=0.2,
+        lr=3e-4, entropy_coef=0.01, num_neg=512, device=None
+):
+    """Proximal Policy Optimisation for budget-constrained slate recommendation."""
+    if device is None:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+    policy_net = PolicyNetwork(state_dim=5, hidden_dim=64).to(device)
+    value_net = ValueNetwork(state_dim=3, hidden_dim=64).to(device)
+    pol_opt = optim.Adam(policy_net.parameters(), lr=lr)
+    val_opt = optim.Adam(value_net.parameters(), lr=lr)
+
+    results = []
+    for it in range(num_iter):
+        print(f"PPO Iteration {it+1}/{num_iter}: collecting trajectories ...")
+        all_slates, old_log_probs, all_state_feats = _collect_trajectories(
+            policy_net, user_initial_budget, doc_relevances, doc_costs,
+            slate_size, num_docs, num_users, device
+        )
+        traj = get_simulation_data(
+            num_users=num_users, slate_size=slate_size, num_docs=num_docs,
+            user_initial_budget=user_initial_budget, doc_costs=doc_costs,
+            doc_relevances=doc_relevances, user_slates=all_slates,
+            default_no_choice_logit=4.0, seed=seed
+        )
+        metrics = compute_metrics(traj, slate_size, num_users)
+
+        per_pos_rewards = _get_per_position_rewards(traj, num_users, slate_size)
+
+        # Compute GAE for all users
+        all_returns, all_advantages = [], []
+        for u in range(num_users):
+            sf = torch.FloatTensor(all_state_feats[u]).to(device)
+            with torch.no_grad():
+                vals = value_net(sf).cpu().numpy().tolist()
+            rets, advs = _compute_gae(per_pos_rewards[u], vals, discount_factor)
+            all_returns.append(rets)
+            all_advantages.append(advs)
+
+        flat_adv = np.array([a for advs in all_advantages for a in advs])
+        adv_mean, adv_std = flat_adv.mean(), flat_adv.std() + 1e-8
+
+        policy_net.train()
+        value_net.train()
+        for _ in range(ppo_epochs):
+            for u in range(num_users):
+                budget = float(user_initial_budget[u])
+                cum_rel = float(np.exp(0.0))
+                chosen_so_far = []
+                for k in range(slate_size):
+                    chosen = int(all_slates[u, k])
+                    old_lp = old_log_probs[u][k]
+                    ret = all_returns[u][k]
+                    adv = (all_advantages[u][k] - adv_mean) / adv_std
+
+                    sf = torch.FloatTensor([[k, budget, cum_rel]]).to(device)
+                    val_pred = value_net(sf)
+                    val_loss = (val_pred - ret) ** 2
+                    val_opt.zero_grad()
+                    val_loss.backward()
+                    torch.nn.utils.clip_grad_norm_(value_net.parameters(), 0.5)
+                    val_opt.step()
+
+                    feats = _build_item_features_tensor(
+                        k, doc_relevances, doc_costs, budget, cum_rel, num_docs
+                    ).to(device)
+                    new_lp = _sampled_action_logprob(
+                        policy_net, feats, chosen, set(chosen_so_far), device, num_neg
+                    )
+                    ratio = torch.exp(new_lp - old_lp)
+                    surr = torch.min(ratio * adv,
+                                     torch.clamp(ratio, 1 - clip_eps, 1 + clip_eps) * adv)
+
+                    # Entropy over sampled subset for regularisation
+                    valid = [i for i in range(num_docs) if i not in set(chosen_so_far)]
+                    samp = np.random.choice(valid, min(num_neg, len(valid)), replace=False)
+                    ent_probs = torch.softmax(policy_net(feats[samp].to(device)), dim=0)
+                    entropy = -(ent_probs * (ent_probs + 1e-8).log()).sum()
+
+                    pol_loss = -surr - entropy_coef * entropy
+                    pol_opt.zero_grad()
+                    pol_loss.backward()
+                    torch.nn.utils.clip_grad_norm_(policy_net.parameters(), 0.5)
+                    pol_opt.step()
+
+                    chosen_so_far.append(chosen)
+                    budget -= float(doc_costs[chosen])
+                    cum_rel += float(np.exp(doc_relevances[chosen]))
+
+        print(f"PPO Iteration {it+1}/{num_iter}: Play Rate={metrics[0]:.4f}, Avg Imp={metrics[1]:.4f}")
+        results.append(metrics)
+
+    return results, policy_net
+
+
+# ============================================================
+# GRPO
+# ============================================================
+
+def run_grpo(
+        num_users, slate_size, num_docs, user_initial_budget,
+        doc_costs, doc_relevances, discount_factor,
+        num_iter=5, seed=0, G=4, lr=3e-4,
+        num_neg=512, device=None
+):
+    """Group Relative Policy Optimisation for budget-constrained slate recommendation.
+
+    Samples G slates per iteration, normalises rewards within the group, and
+    updates the policy proportional to the group-relative advantage — no critic needed.
+    """
+    if device is None:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+    policy_net = PolicyNetwork(state_dim=5, hidden_dim=64).to(device)
+    pol_opt = optim.Adam(policy_net.parameters(), lr=lr)
+
+    results = []
+    for it in range(num_iter):
+        print(f"GRPO Iteration {it+1}/{num_iter}: sampling {G} trajectory groups ...")
+
+        group_slates, group_log_probs, group_rewards = [], [], []
+        for g in range(G):
+            slates, lps, _ = _collect_trajectories(
+                policy_net, user_initial_budget, doc_relevances, doc_costs,
+                slate_size, num_docs, num_users, device
+            )
+            traj = get_simulation_data(
+                num_users=num_users, slate_size=slate_size, num_docs=num_docs,
+                user_initial_budget=user_initial_budget, doc_costs=doc_costs,
+                doc_relevances=doc_relevances, user_slates=slates,
+                default_no_choice_logit=4.0, seed=seed + g
+            )
+            # Terminal per-user reward: 1 if user played anything
+            choice = traj['user_response']['choice'].numpy()
+            play_flags = (choice != slate_size).astype(np.float32)
+            group_slates.append(slates)
+            group_log_probs.append(lps)
+            group_rewards.append(play_flags)
+
+        metrics = compute_metrics(traj, slate_size, num_users)  # last group
+
+        # Normalise rewards within group dimension
+        rewards_arr = np.stack(group_rewards, axis=0)  # (G, num_users)
+        r_mean = rewards_arr.mean(axis=0)
+        r_std = rewards_arr.std(axis=0) + 1e-8
+        norm_rewards = (rewards_arr - r_mean) / r_std  # (G, num_users)
+
+        policy_net.train()
+        for g in range(G):
+            for u in range(num_users):
+                budget = float(user_initial_budget[u])
+                cum_rel = float(np.exp(0.0))
+                chosen_so_far = []
+                nr = float(norm_rewards[g, u])
+                for k in range(slate_size):
+                    chosen = int(group_slates[g][u, k])
+                    feats = _build_item_features_tensor(
+                        k, doc_relevances, doc_costs, budget, cum_rel, num_docs
+                    ).to(device)
+                    new_lp = _sampled_action_logprob(
+                        policy_net, feats, chosen, set(chosen_so_far), device, num_neg
+                    )
+                    loss = -new_lp * nr
+                    pol_opt.zero_grad()
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(policy_net.parameters(), 0.5)
+                    pol_opt.step()
+
+                    chosen_so_far.append(chosen)
+                    budget -= float(doc_costs[chosen])
+                    cum_rel += float(np.exp(doc_relevances[chosen]))
+
+        print(f"GRPO Iteration {it+1}/{num_iter}: Play Rate={metrics[0]:.4f}, Avg Imp={metrics[1]:.4f}")
+        results.append(metrics)
+
+    return results, policy_net
+
+
+# ============================================================
+# GSPO – Group Sequence Policy Optimization
+# ============================================================
+
+def run_gspo(
+        num_users, slate_size, num_docs, user_initial_budget,
+        doc_costs, doc_relevances, discount_factor,
+        num_iter=5, seed=0, G=4, lr=3e-4,
+        clip_eps=0.2, num_neg=512, device=None
+):
+    """Group Sequence Policy Optimization (GSPO) for budget-constrained slate recommendation.
+
+    Like GRPO, G slates are sampled per iteration and group-relative rewards are used
+    as advantages (no critic).  Unlike GRPO, the importance-sampling ratio is computed
+    at the *sequence* level — the product of per-step ratios over the full slate — and
+    clipping is applied to that sequence-level ratio before the policy update.
+    This avoids the compounding-ratio instability of per-step IS while preserving the
+    critic-free simplicity of group-relative normalisation.
+    """
+    if device is None:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+    policy_net = PolicyNetwork(state_dim=5, hidden_dim=64).to(device)
+    pol_opt = optim.Adam(policy_net.parameters(), lr=lr)
+
+    results = []
+    for it in range(num_iter):
+        print(f"GSPO Iteration {it+1}/{num_iter}: sampling {G} trajectory groups ...")
+
+        group_slates, group_old_log_probs, group_rewards = [], [], []
+        for g in range(G):
+            slates, lps, _ = _collect_trajectories(
+                policy_net, user_initial_budget, doc_relevances, doc_costs,
+                slate_size, num_docs, num_users, device
+            )
+            traj = get_simulation_data(
+                num_users=num_users, slate_size=slate_size, num_docs=num_docs,
+                user_initial_budget=user_initial_budget, doc_costs=doc_costs,
+                doc_relevances=doc_relevances, user_slates=slates,
+                default_no_choice_logit=4.0, seed=seed + g
+            )
+            # Terminal per-user reward: 1 if any item was chosen, else 0
+            choice = traj['user_response']['choice'].numpy()
+            play_flags = (choice != slate_size).astype(np.float32)
+            group_slates.append(slates)
+            group_old_log_probs.append(lps)
+            group_rewards.append(play_flags)
+
+        # Record metrics from the final group for logging
+        metrics = compute_metrics(traj, slate_size, num_users)
+
+        # Group-relative reward normalisation
+        rewards_arr = np.stack(group_rewards, axis=0)  # (G, num_users)
+        r_mean = rewards_arr.mean(axis=0)
+        r_std = rewards_arr.std(axis=0) + 1e-8
+        norm_rewards = (rewards_arr - r_mean) / r_std  # (G, num_users)
+
+        # GSPO policy update — sequence-level IS ratio with clipping
+        policy_net.train()
+        for g in range(G):
+            for u in range(num_users):
+                budget = float(user_initial_budget[u])
+                cum_rel = float(np.exp(0.0))
+                chosen_so_far = []
+                nr = float(norm_rewards[g, u])
+
+                # Accumulate per-step log ratios into a sequence-level log ratio
+                seq_log_ratio = torch.zeros(1, device=device)
+                step_new_lps = []
+                for k in range(slate_size):
+                    chosen = int(group_slates[g][u, k])
+                    old_lp = group_old_log_probs[g][u][k]
+
+                    feats = _build_item_features_tensor(
+                        k, doc_relevances, doc_costs, budget, cum_rel, num_docs
+                    ).to(device)
+                    new_lp = _sampled_action_logprob(
+                        policy_net, feats, chosen, set(chosen_so_far), device, num_neg
+                    )
+                    step_new_lps.append(new_lp)
+                    seq_log_ratio = seq_log_ratio + (new_lp - old_lp)
+
+                    chosen_so_far.append(chosen)
+                    budget -= float(doc_costs[chosen])
+                    cum_rel += float(np.exp(doc_relevances[chosen]))
+
+                # Sequence-level clipped surrogate objective
+                seq_ratio = torch.exp(seq_log_ratio)
+                surr1 = seq_ratio * nr
+                surr2 = torch.clamp(seq_ratio, 1 - clip_eps, 1 + clip_eps) * nr
+                loss = -torch.min(surr1, surr2)
+
+                pol_opt.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(policy_net.parameters(), 0.5)
+                pol_opt.step()
+
+        print(f"GSPO Iteration {it+1}/{num_iter}: Play Rate={metrics[0]:.4f}, Avg Imp={metrics[1]:.4f}")
+        results.append(metrics)
+
+    return results, policy_net
+
+
+# ============================================================
+# Seed-level runners (mirror existing run_sarsa_for_seed style)
+# ============================================================
+
+def run_ppo_for_seed(budget, discount_factor, seed, num_iter, num_users, item_relevances):
+    print(f"====== PPO Experiment Start - [Seed: {seed}, Budget: {budget}, Discount Factor: {discount_factor}] ======")
+    np.random.seed(seed)
+    params = Params(
+        num_users=num_users, num_docs=num_items, slate_size=slate_size,
+        epsilon=epsilon, budget=budget, seed=seed, discount_factor=discount_factor
+    )
+    all_user_budgets = np.random.lognormal(np.log(params.budget), user_budget_scale, params.num_users)
+    cost_all_items = np.random.uniform(cost_low, cost_high, size=params.num_docs)
+    results, _ = run_ppo(
+        num_users=params.num_users, slate_size=params.slate_size, num_docs=params.num_docs,
+        user_initial_budget=all_user_budgets, doc_costs=cost_all_items,
+        doc_relevances=item_relevances, discount_factor=params.discount_factor,
+        num_iter=num_iter, seed=params.seed
+    )
+    print(f"====== PPO Experiment End - [Seed: {seed}, Budget: {budget}, Discount Factor: {discount_factor}] ======")
+    return params, results
+
+
+def run_grpo_for_seed(budget, discount_factor, seed, num_iter, num_users, item_relevances):
+    print(f"====== GRPO Experiment Start - [Seed: {seed}, Budget: {budget}, Discount Factor: {discount_factor}] ======")
+    np.random.seed(seed)
+    params = Params(
+        num_users=num_users, num_docs=num_items, slate_size=slate_size,
+        epsilon=epsilon, budget=budget, seed=seed, discount_factor=discount_factor
+    )
+    all_user_budgets = np.random.lognormal(np.log(params.budget), user_budget_scale, params.num_users)
+    cost_all_items = np.random.uniform(cost_low, cost_high, size=params.num_docs)
+    results, _ = run_grpo(
+        num_users=params.num_users, slate_size=params.slate_size, num_docs=params.num_docs,
+        user_initial_budget=all_user_budgets, doc_costs=cost_all_items,
+        doc_relevances=item_relevances, discount_factor=params.discount_factor,
+        num_iter=num_iter, seed=params.seed
+    )
+    print(f"====== GRPO Experiment End - [Seed: {seed}, Budget: {budget}, Discount Factor: {discount_factor}] ======")
+    return params, results
+
+
+def run_gspo_for_seed(budget, discount_factor, seed, num_iter, num_users, item_relevances):
+    print(f"====== GSPO Experiment Start - [Seed: {seed}, Budget: {budget}, Discount Factor: {discount_factor}] ======")
+    np.random.seed(seed)
+    params = Params(
+        num_users=num_users, num_docs=num_items, slate_size=slate_size,
+        epsilon=epsilon, budget=budget, seed=seed, discount_factor=discount_factor
+    )
+    all_user_budgets = np.random.lognormal(np.log(params.budget), user_budget_scale, params.num_users)
+    cost_all_items = np.random.uniform(cost_low, cost_high, size=params.num_docs)
+    results, _ = run_gspo(
+        num_users=params.num_users, slate_size=params.slate_size, num_docs=params.num_docs,
+        user_initial_budget=all_user_budgets, doc_costs=cost_all_items,
+        doc_relevances=item_relevances, discount_factor=params.discount_factor,
+        num_iter=num_iter, seed=params.seed
+    )
+    print(f"====== GSPO Experiment End - [Seed: {seed}, Budget: {budget}, Discount Factor: {discount_factor}] ======")
+    return params, results
+
 
 def get_item_relevances():
     item_relevance_map = {}
@@ -1350,6 +1886,7 @@ if __name__ == "__main__":
 
     item_relevances = get_item_relevances()
 
+    # ---- SARSA ----
     results_sarsa = {}
     for p in parameter_grid:
         params, experiment_results = run_sarsa_for_seed(
@@ -1361,10 +1898,10 @@ if __name__ == "__main__":
         )
         results_sarsa[str(params)] = experiment_results
 
-    # print(results_sarsa)
     with open('../outputs/results_sarsa.json', 'w') as f:
         json.dump(results_sarsa, f, indent=4, default=lambda o: float(o) if isinstance(o, np.floating) else o)
 
+    # ---- Q-Learning ----
     results_qlearning = {}
     for p in parameter_grid:
         params, experiment_results = run_qlearning_for_seed(
@@ -1376,10 +1913,58 @@ if __name__ == "__main__":
             item_relevances=item_relevances
         )
         results_qlearning[str(params)] = experiment_results
-    
-    # print(results_qlearning)
+
     with open('../outputs/results_qlearning.json', 'w') as f:
         json.dump(results_qlearning, f, indent=4, default=lambda o: float(o) if isinstance(o, np.floating) else o)
 
+    # ---- PPO ----
+    results_ppo = {}
+    for p in parameter_grid:
+        params, experiment_results = run_ppo_for_seed(
+            seed=p['seed'],
+            budget=p['budget'],
+            discount_factor=p['discount_factor'],
+            num_iter=5,
+            num_users=num_users,
+            item_relevances=item_relevances
+        )
+        results_ppo[str(params)] = experiment_results
+
+    with open('../outputs/results_ppo.json', 'w') as f:
+        json.dump(results_ppo, f, indent=4, default=lambda o: float(o) if isinstance(o, np.floating) else o)
+
+    # ---- GRPO ----
+    results_grpo = {}
+    for p in parameter_grid:
+        params, experiment_results = run_grpo_for_seed(
+            seed=p['seed'],
+            budget=p['budget'],
+            discount_factor=p['discount_factor'],
+            num_iter=5,
+            num_users=num_users,
+            item_relevances=item_relevances
+        )
+        results_grpo[str(params)] = experiment_results
+
+    with open('../outputs/results_grpo.json', 'w') as f:
+        json.dump(results_grpo, f, indent=4, default=lambda o: float(o) if isinstance(o, np.floating) else o)
+
+    # ---- GSPO ----
+    results_gspo = {}
+    for p in parameter_grid:
+        params, experiment_results = run_gspo_for_seed(
+            seed=p['seed'],
+            budget=p['budget'],
+            discount_factor=p['discount_factor'],
+            num_iter=5,
+            num_users=num_users,
+            item_relevances=item_relevances
+        )
+        results_gspo[str(params)] = experiment_results
+
+    with open('../outputs/results_gspo.json', 'w') as f:
+        json.dump(results_gspo, f, indent=4, default=lambda o: float(o) if isinstance(o, np.floating) else o)
+
+    # ---- Plotting ----
     plot_results()
     plot_comparison()
