@@ -39,14 +39,17 @@ Make sure to set the correct hyper-parameters and initial parameter ranges for t
 If you use this codebase in academic work, please cite:
 
 ```
-@misc{chakrabarty2025timeconstrainedrecommendationsreinforcementlearning,
-    title={Time-Constrained Recommendations: Reinforcement Learning Strategies for E-Commerce}, 
+@conference{icpram26,
     author={Sayak Chakrabarty and Souradip Pal},
-    year={2025},
-    eprint={2512.13726},
-    archivePrefix={arXiv},
-    primaryClass={cs.LG},
-    url={https://arxiv.org/abs/2512.13726}
+    title={Time-Constrained Recommendations: Reinforcement Learning Strategies for E-Commerce},
+    booktitle={Proceedings of the 15th International Conference on Pattern Recognition Applications and Methods - ICPRAM},
+    year={2026},
+    pages={290-297},
+    publisher={SciTePress},
+    organization={INSTICC},
+    doi={10.5220/0014298000004067},
+    isbn={978-989-758-797-9},
+    issn={2184-4313},
 }
 ```
 
