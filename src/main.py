@@ -20,7 +20,7 @@ class Config:
     model_type = 1
     batch_size = 32
     seq_len = 30
-    train_epochs = 5
+    train_epochs = 300
     train_steps_per_epoch = 1000
     validation_steps = 10
     early_stop_patience = 10
@@ -28,11 +28,11 @@ class Config:
     d_feature = 83
     d_model = 64
     d_inner_hid = 128
-    n_head = 1
+    n_head = 8
     d_k = 64
     d_v = 64
-    n_layers = 2
-    dropout = 0.1
+    n_layers = 8
+    dropout = 0.2
     pos_embedding_mode = 1  # 0: fixed PE, 1: learnable PE, 2: no PE
     continue_train = False
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
